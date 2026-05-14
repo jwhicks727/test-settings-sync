@@ -1,0 +1,16 @@
+# Credentials — NEVER commit
+credentials.json
+
+# Browser profile with saved sessions
+edge-profile/
+
+# Downloaded files and run archives
+downloads/
+runs/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Temp files from merge
+*_temp.xlsx
