@@ -13,4 +13,4 @@ __pycache__/
 *.pyc
 
 # Temp files from merge
-*_temp.xlsx
+*_temp.xlsx.DS_Store
