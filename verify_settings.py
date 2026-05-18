@@ -11,6 +11,7 @@ import glob
 import time
 import os
 import openpyxl
+from datetime import datetime
 from browser_helpers import find_element, js_click
 from toms_helpers import reenter_frame
 
@@ -95,7 +96,7 @@ def download_settings_report(driver, report_value, downloads_dir, file_pattern, 
     return report_file
 
 
-def verify_via_report(csv_path, report_path, report_settings_start_col=16, report_header_row=2, report_data_start_row=3):
+def verify_via_report(csv_path, report_path, report_settings_start_col=16, report_header_row=2, report_data_start_row=3, driver=None):
     """Compare uploaded Aeries data against the TOMS settings report.
 
     Args:
@@ -211,6 +212,97 @@ def verify_via_report(csv_path, report_path, report_settings_start_col=16, repor
             if detail['status'] == 'missing':
                 print(f"    SSID {detail['ssid']}")
 
+    # Fall back to UI verification for students missing from the report
+    if results['missing'] > 0 and driver is not None:
+        upload_date_str = datetime.now().strftime("%m/%d/%y")
+        print(f"\n  Checking {results['missing']} missing student(s) via TOMS UI...")
+
+        # Navigate to Students menu
+        driver.switch_to.default_content()
+        driver.execute_script("""
+            var btn = document.getElementById('menu_Students');
+            if (btn) btn.click();
+        """)
+        time.sleep(1)
+
+        still_missing = 0
+        for detail in results['details']:
+            if detail['status'] == 'missing':
+                ssid = detail['ssid']
+                print(f"\n    Checking SSID {ssid}...")
+                ui_result = verify_student_via_ui(driver, ssid, upload_date_str)
+                if ui_result == 'pass':
+                    detail['status'] = 'pass (via UI)'
+                    results['missing'] -= 1
+                    results['matched'] += 1
+                else:
+                    still_missing += 1
+
+        if still_missing == 0:
+            print(f"\n  All missing students verified via UI ✓")
+        else:
+            print(f"\n  {still_missing} student(s) could not be verified")
+
+    # Fall back to UI verification for mismatched students
+    if results['mismatched'] > 0 and driver is not None:
+        print(f"\n  Re-checking {results['mismatched']} mismatched student(s) via TOMS UI...")
+
+        # Navigate to Students menu (may already be there from missing-student check)
+        driver.switch_to.default_content()
+        driver.execute_script("""
+            var btn = document.getElementById('menu_Students');
+            if (btn) btn.click();
+        """)
+        time.sleep(1)
+
+        resolved = 0
+        for detail in results['details']:
+            if detail['status'] != 'mismatch':
+                continue
+
+            ssid = detail['ssid']
+            print(f"\n    Re-checking SSID {ssid}...")
+
+            if not navigate_to_student(driver, ssid):
+                print(f"    Could not navigate to student — keeping mismatch.")
+                continue
+
+            live = get_student_settings_from_toms(driver)
+
+            # Translate expected codes the same way the report comparison does
+            exp_settings = expected[ssid]
+            translated_exp = set()
+            for code in exp_settings:
+                if code in CODE_EQUIVALENTS:
+                    equiv = CODE_EQUIVALENTS[code]
+                    if equiv is not None:
+                        translated_exp.add(equiv)
+                else:
+                    translated_exp.add(code)
+
+            missing = translated_exp - live
+            extra = live - translated_exp
+
+            if not missing and not extra:
+                print(f"    ✓ All settings confirmed via UI (report was incomplete)")
+                detail['status'] = 'pass (via UI)'
+                detail['missing'] = set()
+                detail['extra'] = set()
+                results['mismatched'] -= 1
+                results['matched'] += 1
+                resolved += 1
+            else:
+                print(f"    ✗ Still mismatched after UI check:")
+                if missing:
+                    print(f"      Missing from TOMS: {missing}")
+                if extra:
+                    print(f"      Extra in TOMS: {extra}")
+                detail['missing'] = missing
+                detail['extra'] = extra
+
+        if resolved > 0:
+            print(f"\n  Resolved {resolved} mismatch(es) via UI (report download was incomplete)")        
+
     return results
 
 def get_student_settings_from_csv(csv_path, ssid):
@@ -247,21 +339,24 @@ def get_student_settings_from_toms(driver):
     """
     settings = driver.execute_script("""
         var codes = [];
+        var tables = document.querySelectorAll('.v4_fancy_table');
 
-        // Checked checkboxes
-        var checkboxes = document.querySelectorAll('input[type="checkbox"]:checked');
-        for (var i = 0; i < checkboxes.length; i++) {
-            if (checkboxes[i].value && checkboxes[i].value !== 'on') {
-                codes.push(checkboxes[i].value);
+        for (var t = 0; t < tables.length; t++) {
+            // Checked checkboxes
+            var checkboxes = tables[t].querySelectorAll('input[type="checkbox"]:checked');
+            for (var i = 0; i < checkboxes.length; i++) {
+                if (checkboxes[i].value && checkboxes[i].value !== 'on') {
+                    codes.push(checkboxes[i].value);
+                }
             }
-        }
 
-        // Selected dropdown values (non-empty)
-        var selects = document.querySelectorAll('select');
-        for (var i = 0; i < selects.length; i++) {
-            var val = selects[i].value;
-            if (val && val !== '' && val !== 'Select') {
-                codes.push(val);
+            // Selected dropdown values (non-empty)
+            var selects = tables[t].querySelectorAll('select');
+            for (var i = 0; i < selects.length; i++) {
+                var val = selects[i].value;
+                if (val && val !== '' && val !== 'Select') {
+                    codes.push(val);
+                }
             }
         }
 
@@ -417,5 +512,46 @@ def verify_upload(driver, csv_path, sample_size=3):
                 'missing': missing, 'extra': extra
             })
 
+            
+
     print(f"\n── Verification complete: {results['passed']} passed, {results['failed']} failed ──")
     return results
+
+def verify_student_via_ui(driver, ssid, upload_date_str):
+    """Check a single student's test settings via the TOMS UI.
+    
+    Looks for the Last Updated Date matching the upload date
+    and Last Updated Source showing 'Upload'.
+
+    Args:
+        driver: Selenium WebDriver instance
+        ssid: Student SSID to check
+        upload_date_str: Today's date in MM/DD/YY format (e.g. '05/14/26')
+
+    Returns:
+        'pass', 'fail', or 'error'
+    """
+    import time
+
+    if not navigate_to_student(driver, ssid):
+        return 'error'
+
+    # Check for Last Updated Date and Source
+    result = driver.execute_script("""
+        var cells = document.querySelectorAll('td');
+        var found_date = false;
+        var found_upload = false;
+        for (var i = 0; i < cells.length; i++) {
+            var text = cells[i].textContent.trim();
+            if (text.includes(arguments[0])) found_date = true;
+            if (text === 'Upload') found_upload = true;
+        }
+        return {date: found_date, upload: found_upload};
+    """, upload_date_str)
+
+    if result['date'] and result['upload']:
+        print(f"    ✓ Last Updated: {upload_date_str}, Source: Upload")
+        return 'pass'
+    else:
+        print(f"    ✗ Date match: {result['date']}, Upload source: {result['upload']}")
+        return 'fail'

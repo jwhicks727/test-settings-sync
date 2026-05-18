@@ -44,6 +44,12 @@ ELPAC_REPORT_VALUE = "School_Level_ELPAC_Student_Test_Settings_Report"
 
 SHEET_XML_PATH = "xl/worksheets/sheet4.xml"
 
+def has_changes(changes):
+    """Check if a changes dict has any actual changes."""
+    if not changes:
+        return False
+    return bool(changes['new_students'] or changes['removed_students']
+                or changes['settings_added'] or changes['settings_removed'])
 
 def main():
     # ── Parse arguments ──────────────────────────────────────────────────
@@ -106,6 +112,13 @@ def main():
 
         print("\nAeries exports complete.")
 
+        # ── Diff against previous run ────────────────────────────────────
+        from change_tracker import diff_runs, update_changelog, format_changes_for_report
+
+        print("\n── Change Detection ───────────────────────────────────")
+        caaspp_changes = diff_runs(caaspp_export, 'CAASPP')
+        elpac_changes = diff_runs(elpac_export, 'ELPAC')
+
         # ═══════════════════════════════════════════════════════════════════
         # PHASE 2: TOMS CAASPP UPLOAD
         # ═══════════════════════════════════════════════════════════════════
@@ -122,45 +135,50 @@ def main():
             print("TOMS CAASPP login failed. Stopping.")
             return
 
-        # Navigate: Students > Upload > Test Settings > Next
-        toms_navigate_to_upload(driver, upload_type_value=CAASPP_UPLOAD_TYPE)
+        # Upload only if there are changes
+        if has_changes(caaspp_changes):
+            # Navigate: Students > Upload > Test Settings > Next
+            toms_navigate_to_upload(driver, upload_type_value=CAASPP_UPLOAD_TYPE)
 
-        # Download the blank CAASPP template from TOMS
-        caaspp_template = toms_download_template(driver, downloads_dir, CAASPP_TEMPLATE)
-        if not caaspp_template:
-            print("CAASPP template download failed. Stopping.")
-            return
+            # Download the blank CAASPP template from TOMS
+            caaspp_template = toms_download_template(driver, downloads_dir, CAASPP_TEMPLATE)
+            if not caaspp_template:
+                print("CAASPP template download failed. Stopping.")
+                return
 
-        # Fill the template with Aeries data (zip-level XML merge)
-        merge(caaspp_template, caaspp_export, sheet_xml_path=SHEET_XML_PATH)
+            # Fill the template with Aeries data (zip-level XML merge)
+            merge(caaspp_template, caaspp_export, sheet_xml_path=SHEET_XML_PATH)
 
-        # Upload the merged file to TOMS (or skip in test mode)
-        if args.test:
-            caaspp_result = 'test (not uploaded)'
-            print("Test mode — skipping upload.")
+            # Upload the merged file to TOMS (or skip in test mode)
+            if args.test:
+                caaspp_result = 'test (not uploaded)'
+                print("Test mode — skipping upload.")
+            else:
+                caaspp_result = toms_upload_and_submit(driver, caaspp_template)
         else:
-            caaspp_result = toms_upload_and_submit(driver, caaspp_template)
+            caaspp_result = 'no changes'
+            print("No CAASPP changes since last run — skipping upload.")
+
         print(f"CAASPP result: {caaspp_result}")
 
-        # ── Verify CAASPP upload via settings report ─────────────────────
-        if caaspp_result == 'uploaded':
+        # ── Verify CAASPP settings via report ────────────────────────────
+        sheets_updated = False
+        if caaspp_result in ('uploaded', 'no changes'):
             from verify_settings import download_settings_report, verify_via_report
 
-            # Navigate to Reports tab and download the full settings report
             caaspp_report = download_settings_report(
                 driver,
                 CAASPP_REPORT_VALUE,
                 downloads_dir,
                 '*CAASPP_StudentTestSettings*'
             )
-            # Compare the report against what we uploaded
             if caaspp_report:
-                caaspp_report_verify = verify_via_report(caaspp_export, caaspp_report)
+                caaspp_report_verify = verify_via_report(caaspp_export, caaspp_report, driver=driver)
 
-        # Upload CAASPP report to Google Sheets
+            # Upload CAASPP report to Google Sheets
             if caaspp_report:
                 from sheets_upload import upload_report_to_sheets
-                upload_report_to_sheets(caaspp_report, sheet_name="Raw")        
+                sheets_updated = upload_report_to_sheets(caaspp_report, sheet_name="Raw")
 
         # ═══════════════════════════════════════════════════════════════════
         # PHASE 3: TOMS ELPAC UPLOAD
@@ -180,31 +198,36 @@ def main():
             print("TOMS ELPAC login failed. Stopping.")
             return
 
-        # Navigate: Students > Upload > Test Settings > Next
-        toms_navigate_to_upload(driver, upload_type_value=ELPAC_UPLOAD_TYPE)
+        # Upload only if there are changes
+        if has_changes(elpac_changes):
+            # Navigate: Students > Upload > Test Settings > Next
+            toms_navigate_to_upload(driver, upload_type_value=ELPAC_UPLOAD_TYPE)
 
-        # Download the blank ELPAC template from TOMS
-        elpac_template = toms_download_template(driver, downloads_dir, ELPAC_TEMPLATE)
-        if not elpac_template:
-            print("ELPAC template download failed. Stopping.")
-            return
+            # Download the blank ELPAC template from TOMS
+            elpac_template = toms_download_template(driver, downloads_dir, ELPAC_TEMPLATE)
+            if not elpac_template:
+                print("ELPAC template download failed. Stopping.")
+                return
 
-        # Fill the template with Aeries data (zip-level XML merge)
-        merge(elpac_template, elpac_export, sheet_xml_path=SHEET_XML_PATH)
+            # Fill the template with Aeries data (zip-level XML merge)
+            merge(elpac_template, elpac_export, sheet_xml_path=SHEET_XML_PATH)
 
-        # Upload the merged file to TOMS (or skip in test mode)
-        if args.test:
-            elpac_result = 'test (not uploaded)'
-            print("Test mode — skipping upload.")
+            # Upload the merged file to TOMS (or skip in test mode)
+            if args.test:
+                elpac_result = 'test (not uploaded)'
+                print("Test mode — skipping upload.")
+            else:
+                elpac_result = toms_upload_and_submit(driver, elpac_template)
         else:
-            elpac_result = toms_upload_and_submit(driver, elpac_template)
+            elpac_result = 'no changes'
+            print("No ELPAC changes since last run — skipping upload.")
+
         print(f"ELPAC result: {elpac_result}")
 
-        # ── Verify ELPAC upload via settings report ──────────────────────
-        if elpac_result == 'uploaded':
+        # ── Verify ELPAC settings via report ─────────────────────────────
+        if elpac_result in ('uploaded', 'no changes'):
             from verify_settings import download_settings_report, verify_via_report
 
-            # Navigate to Reports tab and download the full settings report
             elpac_report = download_settings_report(
                 driver,
                 ELPAC_REPORT_VALUE,
@@ -212,9 +235,8 @@ def main():
                 '*_StudentTestSettings_*',
                 form_id='elpacstudentTestSettingsForm'
             )
-            # Compare the report against what we uploaded
             if elpac_report:
-                elpac_report_verify = verify_via_report(elpac_export, elpac_report, report_settings_start_col=17)
+                elpac_report_verify = verify_via_report(elpac_export, elpac_report, report_settings_start_col=17, driver=driver)
 
         # ── Archive run files ────────────────────────────────────────────
         run_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -227,12 +249,36 @@ def main():
         print(f"\nRun files archived to: {run_dir}")
 
         # Clean downloads folder if both uploads succeeded
-        if not args.test and caaspp_result == 'uploaded' and elpac_result == 'uploaded':
+        if not args.test and caaspp_result in ('uploaded', 'no changes') and elpac_result in ('uploaded', 'no changes'):
             for f in glob.glob(os.path.join(downloads_dir, "*")):
                 os.remove(f)
             print("Downloads folder cleaned up.")
         else:
             print("Downloads folder preserved — not all uploads succeeded.")
+
+        # Update cumulative changelog
+        if caaspp_changes:
+            update_changelog(caaspp_changes)
+        if elpac_changes:
+            update_changelog(elpac_changes)    
+
+        # ── Generate report and send email ───────────────────────────────
+        from report_generator import generate_report, send_email
+
+        pdf_path, text_summary = generate_report(
+            run_dir, caaspp_result, elpac_result,
+            caaspp_report_verify, elpac_report_verify,
+            caaspp_changes=caaspp_changes,
+            elpac_changes=elpac_changes,
+            sheets_updated=sheets_updated
+        )
+
+        # Email the text summary
+        today_str = datetime.now().strftime("%m/%d/%Y")
+        send_email(
+            f"Test Settings Sync — {today_str}",
+            text_summary
+        )
 
         # ═══════════════════════════════════════════════════════════════════
         # SUMMARY

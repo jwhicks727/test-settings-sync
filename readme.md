@@ -187,9 +187,17 @@ all source files and merged outputs for auditing and troubleshooting.
  
 **✅ Google Sheets sync** — After each upload verification, automatically pushes the full School-Level Student Test Settings Report to a shared Google Sheet via service account API. Replaces the "Raw" tab with current TOMS settings data, providing the team with an always-current reference without manual exports.
 
+**✅ Hybrid verification** — After each upload, downloads the full School-Level Student Test Settings Report and compares every student's settings against the uploaded data. Students missing from the report are automatically verified through the TOMS UI by checking the Last Updated Date and Upload source stamp. Handles known code differences between Aeries and TOMS via an equivalence map. Runs for both CAASPP and ELPAC with format-aware column parsing.
+
+**✅ Per-run reporting and notifications** — Each run generates a PDF report in the archive folder and emails a plain-text summary to configured recipients via Gmail API. Reports include upload results, verification counts with mismatch details, change detection against the previous run (new/removed students and settings), Google Sheets sync status, and UI fallback results. A cumulative changelog tracks every setting change across all runs for year-long auditing.
+
 ---
  
 ## Roadmap
+
+**Change tracker timestamp context** — Change the report's "Settings
+added (N):" line to read "Settings added since [last run datetime]:" so
+each run's diff is anchored to a specific previous run.
 
 **Error handling and retry** — when TOMS returns validation errors,
 download the error CSV, identify affected students and settings, remove
@@ -198,10 +206,26 @@ the problematic values from the template, and re-upload automatically.
 **2SV page detection** — detect the TOMS two-step verification page by
 its elements rather than by timeout, for faster and more reliable login
 handling.
- 
-**Report generator** — generate per-run reports logging what was
-uploaded, what was verified, and any discrepancies found.
- 
+
+**SEIS test settings import module** - Extend sync-test-settings to pull test accommodations data from SEIS (the IEP-driven source of truth) and import it into Aeries via the existing "Import Data to Aeries" interface, eliminating duplicate manual entry between systems. Workflow: Selenium-driven export of the TOMS Summative Assessments report from SEIS, data transformation to Aeries' import format, upload via existing Selenium patterns. The existing sync-test-settings logic then handles the Aeries-to-TOMS step. Subject to the same CAASPP affidavit human-in-the-loop constraint as the current workflow.
+
+**SEIS orchestrator integration** — Once the SEIS import module is
+verified, add it as Phase 0 in sync_test_settings.py, running before
+Aeries exports so that IEP-driven settings flow through the full
+pipeline in a single execution.
+
+**Project reorganization** — Migrate from flat file structure to a helpers/ package as the project scales past 15+ files. Separate runnable scripts from shared modules, update all import paths, and verify with a full test run.
+
+**Report completeness investigation** — The TOMS School-Level Student
+Test Settings Report occasionally omits students or individual settings
+when downloaded via form.submit(), which bypasses the validateReports()
+function used by the normal download flow. Two known symptoms: SSID
+1230368668 entirely absent from report, SSID 5981750447 missing
+NEDS_RA_Items (confirmed present via manual download). Currently handled
+by automatic UI fallback verification. Fix likely involves replicating
+what validateReports() sets before submission, or triggering the actual
+submit button instead of form.submit().
+
 ---
  
 ## Environment
