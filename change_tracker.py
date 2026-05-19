@@ -196,14 +196,14 @@ def format_changes_for_report(changes):
         String with formatted changes, or None if no changes
     """
 
-    lines = []
 
-    # Extract previous run timestamp from path (e.g. "runs/2026-05-18_07-55-28/...")
-    prev_run_dir = os.path.basename(os.path.dirname(changes['previous_file']))
-    prev_display = prev_run_dir.replace("_", " ", 1).replace("-", "/", 2).replace("/", "-", 2)
 
     if not changes:
         return None
+    
+    # Extract previous run timestamp from path (e.g. "runs/2026-05-18_07-55-28/...")
+    prev_run_dir = os.path.basename(os.path.dirname(changes['previous_file']))
+    prev_display = prev_run_dir.replace("_", " ", 1).replace("-", "/", 2).replace("/", "-", 2)
 
     if (not changes['new_students'] and not changes['removed_students']
             and not changes['settings_added'] and not changes['settings_removed']):
@@ -214,14 +214,19 @@ def format_changes_for_report(changes):
     if changes['new_students']:
         lines.append(f"  New students ({len(changes['new_students'])}):")
         for ssid in changes['new_students'][:10]:
-            lines.append(f"    + {ssid}")
+            # Show the student's settings
+            student_settings = [s for sid, s in changes['settings_added'] if sid == ssid]
+            if student_settings:
+                lines.append(f"    {ssid}: {', '.join(student_settings)}")
+            else:
+                lines.append(f"    {ssid}")
         if len(changes['new_students']) > 10:
             lines.append(f"    ... and {len(changes['new_students']) - 10} more")
 
     if changes['removed_students']:
         lines.append(f"  Removed students ({len(changes['removed_students'])}):")
         for ssid in changes['removed_students'][:10]:
-            lines.append(f"    - {ssid}")
+            lines.append(f"    {ssid}")
         if len(changes['removed_students']) > 10:
             lines.append(f"    ... and {len(changes['removed_students']) - 10} more")
 
@@ -233,7 +238,7 @@ def format_changes_for_report(changes):
             if ssid not in changes['new_students']:  # Skip new students, already listed
                 by_student.setdefault(ssid, []).append(setting)
         for ssid, settings in list(by_student.items())[:10]:
-            lines.append(f"    {ssid}: +{', '.join(settings)}")
+            lines.append(f"    {ssid}: {', '.join(settings)}")
         remaining = len(by_student) - 10
         if remaining > 0:
             lines.append(f"    ... and {remaining} more students")
@@ -245,7 +250,7 @@ def format_changes_for_report(changes):
             if ssid not in changes['removed_students']:
                 by_student.setdefault(ssid, []).append(setting)
         for ssid, settings in list(by_student.items())[:10]:
-            lines.append(f"    {ssid}: -{', '.join(settings)}")
+            lines.append(f"    {ssid}: {', '.join(settings)}")
         remaining = len(by_student) - 10
         if remaining > 0:
             lines.append(f"    ... and {remaining} more students")

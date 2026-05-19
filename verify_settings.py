@@ -20,6 +20,7 @@ from toms_helpers import reenter_frame
 CODE_EQUIVALENTS = {
     'NEDS_RA_Items_Stimuli_ESN': 'NEDS_RA_Stimuli_ESN',
     'NEDS_RA_SPA': None,  # Aeries tracks this but TOMS does not
+    'TDS_TTS_ALL': 'TDS_TTS_Item',  # Aeries umbrella code → TOMS component is returned if student does not get Spanish as well
 }
 
 def download_settings_report(driver, report_value, downloads_dir, file_pattern, form_id='studentTestSettingsForm'):

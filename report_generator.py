@@ -58,9 +58,9 @@ def generate_report(run_dir, caaspp_result, elpac_result,
                 if detail['status'] == 'mismatch':
                     lines.append(f"    SSID {detail['ssid']}:")
                     if detail.get('missing'):
-                        lines.append(f"      Missing from TOMS: {detail['missing']}")
+                        lines.append(f"      Missing from TOMS: {', '.join(detail['missing'])}")
                     if detail.get('extra'):
-                        lines.append(f"      Extra in TOMS: {detail['extra']}")
+                        lines.append(f"      Extra in TOMS: {', '.join(detail['extra'])}")
         if caaspp_verify['missing'] > 0:
             lines.append(f"  Missing from report: {caaspp_verify['missing']}")
             for detail in caaspp_verify['details']:
@@ -107,7 +107,6 @@ def generate_report(run_dir, caaspp_result, elpac_result,
                 elif detail['status'] == 'pass (via UI)':
                     lines.append(f"    SSID {detail['ssid']} — verified via UI ✓")
     lines.append("")
-    lines.append(f"Archive: {run_dir}")
 
     text_summary = "\n".join(lines)
 
