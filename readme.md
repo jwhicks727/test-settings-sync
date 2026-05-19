@@ -182,8 +182,6 @@ Detects both successful validation (Upload button) and errors.
  
 **✅ Run archiving** — every run is saved in a timestamped folder with
 all source files and merged outputs for auditing and troubleshooting.
-
-**✅ Report-based verification** — After each upload, automatically downloads the full School-Level Student Test Settings Report from TOMS and compares every student's settings against the uploaded data. Reports match counts, mismatches, and missing students. Runs for both CAASPP and ELPAC with format-aware column parsing.
  
 **✅ Google Sheets sync** — After each upload verification, automatically pushes the full School-Level Student Test Settings Report to a shared Google Sheet via service account API. Replaces the "Raw" tab with current TOMS settings data, providing the team with an always-current reference without manual exports.
 
@@ -191,13 +189,19 @@ all source files and merged outputs for auditing and troubleshooting.
 
 **✅ Per-run reporting and notifications** — Each run generates a PDF report in the archive folder and emails a plain-text summary to configured recipients via Gmail API. Reports include upload results, verification counts with mismatch details, change detection against the previous run (new/removed students and settings), Google Sheets sync status, and UI fallback results. A cumulative changelog tracks every setting change across all runs for year-long auditing.
 
+**✅ Change tracker timestamp context** — The change report now shows
+"Settings added since [last run datetime]" and "No changes since [last
+run datetime]" instead of bare counts, so each run's diff is anchored
+to a specific previous run.
+
+**✅ Skip redundant uploads** — When no changes are detected since the
+last run, the script skips the TOMS template download, merge, and upload
+steps but still downloads the settings report and runs full verification,
+catching any discrepancies introduced outside the sync pipeline.
+
 ---
  
 ## Roadmap
-
-**Change tracker timestamp context** — Change the report's "Settings
-added (N):" line to read "Settings added since [last run datetime]:" so
-each run's diff is anchored to a specific previous run.
 
 **Error handling and retry** — when TOMS returns validation errors,
 download the error CSV, identify affected students and settings, remove

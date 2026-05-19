@@ -214,7 +214,12 @@ def format_changes_for_report(changes):
     if changes['new_students']:
         lines.append(f"  New students ({len(changes['new_students'])}):")
         for ssid in changes['new_students'][:10]:
-            lines.append(f"    + {ssid}")
+            # Show the student's settings
+            student_settings = [s for sid, s in changes['settings_added'] if sid == ssid]
+            if student_settings:
+                lines.append(f"    + {ssid}: {', '.join(student_settings)}")
+            else:
+                lines.append(f"    + {ssid}")
         if len(changes['new_students']) > 10:
             lines.append(f"    ... and {len(changes['new_students']) - 10} more")
 
