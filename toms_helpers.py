@@ -1,7 +1,7 @@
 """Shared TOMS functions for CAASPP and ELPAC upload workflows.
 
 Handles login, role selection, navigation, template download,
-file upload, and validation bounce.
+file upload, validation bounce, and error handling.
 """
 
 import time
@@ -28,7 +28,6 @@ def toms_login(driver, role_text):
             # Wait for either role selection, dashboard, or 2SV
             landed = False
             for check in range(20):
-                # Check for role selection dropdown
                 role_dropdown = driver.execute_script("""
                     var opts = document.querySelectorAll('.myTOMS_roleselect_option');
                     return opts.length > 0;
@@ -50,7 +49,6 @@ def toms_login(driver, role_text):
                 input("Press Enter once you are past verification...")
                 time.sleep(2)
             break
-
 
     # ── Handle role selection if present ──────────────────────────────────
     role_present = driver.execute_script("""
@@ -250,15 +248,103 @@ def toms_download_template(driver, downloads_dir, template_filename):
         return None
 
 
-def toms_upload_and_submit(driver, template_file):
+def toms_download_errors(driver, downloads_dir):
+    """Click errors link, navigate to error page, and download error CSV.
+
+    Args:
+        driver: Selenium WebDriver instance (already in iframe)
+        downloads_dir: Path to downloads directory
+
+    Returns:
+        Path to error CSV, or None if download failed
+    """
+    import glob
+
+    # Click the errors link
+    print("  Clicking errors link...")
+    driver.execute_script("""
+        var link = document.querySelector('a.errorOverlayLink');
+        if (link) link.click();
+    """)
+    time.sleep(2)
+    reenter_frame(driver)
+
+    # Click download button on error details page
+    print("  Downloading error CSV...")
+    driver.execute_script("""
+        var links = document.querySelectorAll('a');
+        for (var i = 0; i < links.length; i++) {
+            var href = links[i].getAttribute('href') || '';
+            var text = links[i].textContent.trim().toLowerCase();
+            if (href.includes('download') || text.includes('download') || text.includes('export')) {
+                links[i].click();
+                break;
+            }
+        }
+    """)
+    time.sleep(2)
+
+    # Wait for CSV to download
+    error_csv = None
+    for attempt in range(15):
+        matches = glob.glob(os.path.join(downloads_dir, "*rror*.*sv"))
+        matches += glob.glob(os.path.join(downloads_dir, "*Error*.*sv"))
+        matches += glob.glob(os.path.join(downloads_dir, "*error*.*sv"))
+        matches = [f for f in matches if not f.endswith('.crdownload')]
+        if matches:
+            error_csv = max(matches, key=os.path.getmtime)
+            break
+        time.sleep(1)
+
+    if error_csv:
+        print(f"  Error report saved: {error_csv}")
+    else:
+        print("  Error report download failed.")
+
+    return error_csv
+
+
+def parse_error_csv(error_csv_path):
+    """Parse a TOMS error CSV into structured error records.
+
+    Returns:
+        List of dicts with keys: ssid, column_name, row_number, error
+    """
+    import csv
+    errors = []
+    with open(error_csv_path, newline='', encoding='utf-8-sig') as f:
+        content = f.read()
+        # Strip HTML comments TOMS wraps the CSV in
+        lines = [line for line in content.splitlines()
+                 if line.strip() and not line.strip().startswith('<!--')]
+        reader = csv.DictReader(lines)
+        for row in reader:
+            ssid = row.get('SSID', '').strip().strip("'")
+            col = row.get('Column Name', '').strip().lstrip('*')
+            row_num = row.get('Row Number', '').strip()
+            error = row.get('Error', '').strip().strip("'")
+            if ssid:
+                errors.append({
+                    'ssid': ssid,
+                    'column_name': col,
+                    'row_number': int(row_num) if row_num.isdigit() else None,
+                    'error': error
+                })
+    return errors
+
+
+def toms_upload_and_submit(driver, template_file, downloads_dir=None):
     """Upload the merged template and handle validation bounce.
 
     Args:
         driver: Selenium WebDriver instance
         template_file: Path to the merged template file
+        downloads_dir: Path to downloads directory (needed for error CSV download)
 
     Returns:
-        'uploaded', 'errors', or 'unknown'
+        'uploaded' on success
+        ('errors', error_csv_path, parsed_errors) on validation errors
+        'unknown' on indeterminate state
     """
     # ── Click Next to upload page ────────────────────────────────────────
     print("Clicking Next...")
@@ -345,8 +431,12 @@ def toms_upload_and_submit(driver, template_file):
         print("Upload clicked. Settings submitted to TOMS.")
         time.sleep(2)
         return 'uploaded'
+    elif has_errors and downloads_dir:
+        error_csv = toms_download_errors(driver, downloads_dir)
+        parsed_errors = parse_error_csv(error_csv) if error_csv else []
+        return ('errors', error_csv, parsed_errors)
     elif has_errors:
-        print("Errors detected — downloading error report...")
+        print("Errors detected but no downloads_dir provided.")
         return 'errors'
     else:
         print("Could not determine validation status — check manually.")

@@ -10,6 +10,118 @@ from browser_helpers import start_driver, find_element, js_click
 SEIS_URL = "https://seis.org/login"
 PROFILE_DIR = "/Users/jasonhicks/Projects/test-settings-sync/edge-profile"
 
+def seis_download_report(driver, downloads_dir):
+    """Navigate SEIS, generate report, and download TOMS export.
+    
+    Args:
+        driver: Selenium WebDriver instance
+        downloads_dir: Path to downloads directory
+        
+    Returns:
+        Path to downloaded xlsx, or None if failed
+    """
+    import os, glob
+
+    print("\nOpening SEIS...")
+    driver.get("https://seis.org/login")
+    time.sleep(2)
+
+    # Check login state
+    for attempt in range(10):
+        login_button = driver.execute_script("""
+            var buttons = document.querySelectorAll('button[type="submit"]');
+            for (var i = 0; i < buttons.length; i++) {
+                if (buttons[i].textContent.trim().includes('Login')) {
+                    return buttons[i];
+                }
+            }
+            return null;
+        """)
+
+        if login_button:
+            print("Login page detected. Clicking Login...")
+            time.sleep(1)
+            js_click(driver, login_button)
+            time.sleep(3)
+
+            if "login" in driver.current_url.lower():
+                print("Manual login required — please log in in the browser.")
+                input("Press Enter once you are logged in...")
+                time.sleep(2)
+            break
+
+        if "login" not in driver.current_url.lower():
+            break
+
+        time.sleep(0.5)
+
+    print("Logged in to SEIS.")
+
+    # Click Reports dropdown
+    print("Clicking Reports...")
+    driver.execute_script("""
+        var links = document.querySelectorAll('.dropdown-toggle');
+        for (var i = 0; i < links.length; i++) {
+            if (links[i].textContent.trim().startsWith('Reports')) {
+                links[i].click();
+                break;
+            }
+        }
+    """)
+    time.sleep(1)
+
+    # Click TOMS Summative Assessments
+    print("Clicking TOMS Summative Assessments...")
+    driver.execute_script("""
+        var link = document.querySelector('a[href="/reports/toms"]');
+        if (link) link.click();
+    """)
+    time.sleep(1)
+
+    # Generate Report
+    print("Clicking Generate Report...")
+    driver.execute_script("""
+        var btn = document.querySelector('button[data-ng-click="vm.createReport()"]');
+        if (btn) btn.click();
+    """)
+    time.sleep(5)
+
+    # Download TOMS report
+    print("Clicking TOMS Download...")
+    driver.execute_script("""
+        var rows = document.querySelectorAll('tr[data-ng-repeat="report in vm.reports"]');
+        if (rows.length > 0) {
+            var links = rows[0].querySelectorAll('a[data-ng-click]');
+            for (var i = 0; i < links.length; i++) {
+                if (links[i].getAttribute('data-ng-click').includes('true')) {
+                    links[i].click();
+                    break;
+                }
+            }
+        }
+    """)
+    print("TOMS download initiated.")
+
+    # Wait for download
+    print("Waiting for download...")
+    seis_report = None
+    for attempt in range(30):
+        xlsx_files = glob.glob(os.path.join(downloads_dir, "*.xlsx"))
+        xlsx_files = [f for f in xlsx_files if not f.endswith('.crdownload')]
+        if xlsx_files:
+            newest = max(xlsx_files, key=os.path.getmtime)
+            import time as time_mod
+            if time_mod.time() - os.path.getmtime(newest) < 30:
+                seis_report = newest
+                break
+        time.sleep(1)
+
+    if seis_report:
+        print(f"SEIS report saved: {seis_report}")
+    else:
+        print("SEIS report download failed.")
+
+    return seis_report
 
 def main():
     driver, wait = start_driver(PROFILE_DIR)
@@ -80,7 +192,7 @@ def main():
             var btn = document.querySelector('button[data-ng-click="vm.createReport()"]');
             if (btn) btn.click();
         """)
-        time.sleep(1)
+        time.sleep(5)
 
         # ── Download TOMS report ─────────────────────────────────────────
         print("Clicking TOMS Download...")
@@ -115,7 +227,7 @@ def main():
                 if time_mod.time() - os.path.getmtime(newest) < 30:
                     seis_report = newest
                     break
-            time.sleep(0.2)
+            time.sleep(1)
 
         if seis_report:
             print(f"SEIS report saved: {seis_report}")

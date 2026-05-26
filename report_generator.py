@@ -25,7 +25,8 @@ RECIPIENTS = [
 def generate_report(run_dir, caaspp_result, elpac_result,
                     caaspp_verify=None, elpac_verify=None,
                     caaspp_changes=None, elpac_changes=None,
-                    sheets_updated=False):
+                    sheets_updated=False, seis_result=None,
+                    caaspp_errors_removed=None, elpac_errors_removed=None):
     """Generate PDF report and return text summary.
 
     Args:
@@ -46,6 +47,12 @@ def generate_report(run_dir, caaspp_result, elpac_result,
     lines.append("TEST SETTINGS SYNC — RUN REPORT")
     lines.append(f"Run: {run_display}")
     lines.append("")
+
+    # SEIS section
+    if seis_result:
+        lines.append("── SEIS ────────────────────────────────────")
+        lines.append(f"  Import: {seis_result}")
+        lines.append("")
 
     # CAASPP section
     lines.append("── CAASPP ──────────────────────────────────")
@@ -68,16 +75,6 @@ def generate_report(run_dir, caaspp_result, elpac_result,
                     lines.append(f"    SSID {detail['ssid']}")
                 elif detail['status'] == 'pass (via UI)':
                     lines.append(f"    SSID {detail['ssid']} — verified via UI ✓")
-    lines.append("")
-    # Changes section
-    lines.append("── CHANGES ─────────────────────────────────")
-    from change_tracker import format_changes_for_report
-    caaspp_change_text = format_changes_for_report(caaspp_changes)
-    elpac_change_text = format_changes_for_report(elpac_changes)
-    lines.append(f"  CAASPP:")
-    lines.append(caaspp_change_text or "  No previous run to compare.")
-    lines.append(f"  ELPAC:")
-    lines.append(elpac_change_text or "  No previous run to compare.")
     lines.append("")
 
     # Google Sheets section
@@ -106,6 +103,17 @@ def generate_report(run_dir, caaspp_result, elpac_result,
                     lines.append(f"    SSID {detail['ssid']}")
                 elif detail['status'] == 'pass (via UI)':
                     lines.append(f"    SSID {detail['ssid']} — verified via UI ✓")
+    lines.append("")
+
+    # Changes section
+    lines.append("── CHANGES ─────────────────────────────────")
+    from change_tracker import format_changes_for_report
+    caaspp_change_text = format_changes_for_report(caaspp_changes)
+    elpac_change_text = format_changes_for_report(elpac_changes)
+    lines.append(f"  CAASPP:")
+    lines.append(caaspp_change_text or "  No previous run to compare.")
+    lines.append(f"  ELPAC:")
+    lines.append(elpac_change_text or "  No previous run to compare.")
     lines.append("")
 
     text_summary = "\n".join(lines)
@@ -147,6 +155,13 @@ def generate_report(run_dir, caaspp_result, elpac_result,
             html += '</tbody></table>'
 
         return html
+
+# Build SEIS HTML section
+    seis_html = ""
+    if seis_result:
+        seis_color = '#2d7a3a' if seis_result.startswith('imported') or seis_result == 'no new settings' else '#c0392b'
+        seis_bg = '#e6f4ea' if seis_result.startswith('imported') or seis_result == 'no new settings' else '#fce8e6'
+        seis_html = f'<h2>SEIS Import <span class="result-badge" style="background: {seis_bg}; color: {seis_color};">{seis_result}</span></h2>'
 
     html_content = f"""
     <!DOCTYPE html>
@@ -234,6 +249,8 @@ def generate_report(run_dir, caaspp_result, elpac_result,
     <body>
         <h1>Test Settings Sync Report</h1>
         <div class="run-info">Run: {run_display}</div>
+
+        {seis_html}
 
         <h2>CAASPP <span class="result-badge" style="background: {'#e6f4ea' if caaspp_result == 'uploaded' else '#fce8e6'}; color: {status_color(caaspp_result)};">{caaspp_result}</span></h2>
         {verify_html(caaspp_verify, 'CAASPP')}

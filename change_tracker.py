@@ -203,11 +203,12 @@ def format_changes_for_report(changes):
     
     # Extract previous run timestamp from path (e.g. "runs/2026-05-18_07-55-28/...")
     prev_run_dir = os.path.basename(os.path.dirname(changes['previous_file']))
-    prev_display = prev_run_dir.replace("_", " ", 1).replace("-", "/", 2).replace("/", "-", 2)
+    prev_dt = datetime.strptime(prev_run_dir, "%Y-%m-%d_%H-%M-%S")
+    prev_display = prev_dt.strftime("%B %-d, %Y at %-I:%M%p").replace("AM", "am").replace("PM", "pm")
 
     if (not changes['new_students'] and not changes['removed_students']
             and not changes['settings_added'] and not changes['settings_removed']):
-        return f"  No changes since {prev_display}."
+        return f"  No changes since last run on {prev_display}."
 
     lines = []
 
@@ -232,7 +233,7 @@ def format_changes_for_report(changes):
 
     # Group setting changes by student
     if changes['settings_added']:
-        lines.append(f"  Settings added since {prev_display} ({len(changes['settings_added'])}):")
+        lines.append(f"  Settings added since last run on {prev_display} ({len(changes['settings_added'])}):")
         by_student = {}
         for ssid, setting in changes['settings_added']:
             if ssid not in changes['new_students']:  # Skip new students, already listed
@@ -244,7 +245,7 @@ def format_changes_for_report(changes):
             lines.append(f"    ... and {remaining} more students")
 
     if changes['settings_removed']:
-        lines.append(f"  Settings removed since {prev_display} ({len(changes['settings_removed'])}):")
+        lines.append(f"  Settings removed since last run on {prev_display} ({len(changes['settings_removed'])}):")
         by_student = {}
         for ssid, setting in changes['settings_removed']:
             if ssid not in changes['removed_students']:

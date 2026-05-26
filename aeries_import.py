@@ -47,10 +47,84 @@ def navigate_to_import(driver):
     time.sleep(2)
     print("Import page loaded.")
 
+def run_aeries_import(driver, csv_path, dry_run=False):
+    """Import a CSV into the Aeries STS table.
+    
+    Args:
+        driver: Selenium WebDriver instance
+        csv_path: Path to the import CSV
+        dry_run: If True, stop before clicking Import
+        
+    Returns:
+        True if import was submitted (or dry_run completed), False on error
+    """
+    navigate_to_import(driver)
+
+    # Step 1: Upload CSV
+    print(f"Uploading {csv_path}...")
+    file_input = find_element(driver, "input.box__file")
+    file_input.send_keys(csv_path)
+    time.sleep(2)
+    print("CSV uploaded.")
+
+    # Step 2: Expand Destination Table accordion
+    print("Expanding Destination Table...")
+    driver.execute_script('document.getElementById("TableAccordionTitle").click();')
+    time.sleep(2)
+
+    # Select STS table
+    print("Selecting STS table...")
+    driver.execute_script("""
+        var cells = document.querySelectorAll('td[role="gridcell"]');
+        for (var i = 0; i < cells.length; i++) {
+            if (cells[i].textContent.trim() === 'STS') {
+                cells[i].click();
+                break;
+            }
+        }
+    """)
+    time.sleep(2)
+
+    # Check "Map ID by this STU.CID" checkbox
+    print("Checking 'Map ID by this STU.CID'...")
+    checkbox = find_element(driver, "input.chkTranslateID")
+    if not checkbox.is_selected():
+        js_click(driver, checkbox)
+    time.sleep(1)
+
+    # Select CID from the mapping dropdown
+    print("Selecting CID from dropdown...")
+    driver.execute_script("""
+        var items = document.querySelectorAll('.ddlitem');
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].textContent.trim() === 'CID') {
+                items[i].click();
+                break;
+            }
+        }
+    """)
+    time.sleep(1)
+
+    if dry_run:
+        print("\n** DRY RUN — Import button NOT clicked. **")
+        return True
+    
+    print("Ready to click Import. Watch the browser...")
+    input("Press Enter to click Import...")
+    
+    # Click Import
+    print("Clicking Import...")
+    import_btn = find_element(driver, "a.ImportData")
+    js_click(driver, import_btn)
+    time.sleep(3)
+    print("Import submitted.")
+    print("Import submitted.")
+    return True
 
 def main():
     driver, wait = start_driver(PROFILE_DIR)
     downloads_dir = os.path.join(os.path.dirname(PROFILE_DIR), "downloads")
+    csv_path = os.path.join(downloads_dir, "seis_aeries_import.csv")
 
     try:
         print("Opening Aeries...")
@@ -58,62 +132,7 @@ def main():
         time.sleep(2)
 
         aeries_login(driver)
-        navigate_to_import(driver)
-
-        # Step 1: Upload CSV
-        csv_path = os.path.join(downloads_dir, "seis_aeries_import.csv")
-        print(f"Uploading {csv_path}...")
-        file_input = find_element(driver, "input.box__file")
-        file_input.send_keys(csv_path)
-        time.sleep(2)
-        print("CSV uploaded.")
-
-        # Step 2: Expand Destination Table accordion
-        print("Expanding Destination Table...")
-        driver.execute_script('document.getElementById("TableAccordionTitle").click();')
-        time.sleep(1)
-
-        # Step 3: Select STS table
-        print("Selecting STS table...")
-        driver.execute_script("""
-            var cells = document.querySelectorAll('td[role="gridcell"]');
-            for (var i = 0; i < cells.length; i++) {
-                if (cells[i].textContent.trim() === 'STS') {
-                    cells[i].click();
-                    break;
-                }
-            }
-        """)
-
-        time.sleep(1)
-
-        # Step 4: Check "Map ID by this STU.CID" checkbox
-        print("Checking 'Map ID by this STU.CID'...")
-        checkbox = find_element(driver, "input.chkTranslateID")
-        if not checkbox.is_selected():
-            js_click(driver, checkbox)
-        time.sleep(1)
-
-        # Step 5: Select CID from the mapping dropdown
-        print("Selecting CID from dropdown...")
-        driver.execute_script("""
-            var items = document.querySelectorAll('.ddlitem');
-            for (var i = 0; i < items.length; i++) {
-                if (items[i].textContent.trim() === 'CID') {
-                    items[i].click();
-                    break;
-                }
-            }
-        """)
-        time.sleep(1)
-
-        # Step 6: Click Import — COMMENTED OUT until human verification is complete
-        print("\n** Import button NOT clicked (commented out for safety). **")
-        # print("Clicking Import...")
-        # import_btn = find_element(driver, "a.ImportData")
-        # js_click(driver, import_btn)
-        # time.sleep(3)
-        # print("Import submitted.")
+        run_aeries_import(driver, csv_path)
 
     except Exception as e:
         print(f"Unexpected error: {e}")
@@ -122,7 +141,6 @@ def main():
         print("\nBrowser will stay open until you press Enter.")
         input("Press Enter to close browser...")
         driver.quit()
-
 
 if __name__ == "__main__":
     main()

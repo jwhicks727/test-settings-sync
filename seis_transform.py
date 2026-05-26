@@ -9,6 +9,15 @@ in Aeries, and outputs only new settings for import.
 import csv
 import openpyxl
 import os
+import json
+
+CODE_MAPPING_FILE = os.path.join(os.path.dirname(__file__), "code_mapping.json")
+
+def load_code_mapping():
+    """Load TOMS → Aeries code mapping."""
+    with open(CODE_MAPPING_FILE, 'r') as f:
+        data = json.load(f)
+    return data['toms_to_aeries']
 
 
 def read_seis_settings(seis_report_path):
@@ -39,6 +48,7 @@ def read_seis_settings(seis_report_path):
 
     wb.close()
     return students
+
 
 
 def read_aeries_settings(aeries_csv_path):
@@ -88,6 +98,18 @@ def transform_seis_to_aeries(seis_report_path, aeries_csv_path=None, output_path
     # Read SEIS settings
     print(f"Reading SEIS report: {seis_report_path}")
     seis_students = read_seis_settings(seis_report_path)
+    
+    # Clean up known malformed SEIS codes
+    SEIS_CODE_FIXES = {
+        'TDS_PoD_StimTDS_PoD_Stim&TDS_PoD_Item': 'TDS_PoD_Stim&TDS_PoD_Item',
+    }
+
+    for ssid in seis_students:
+        fixed = set()
+        for code in seis_students[ssid]:
+            fixed.add(SEIS_CODE_FIXES.get(code, code))
+        seis_students[ssid] = fixed
+
     total_seis_settings = sum(len(s) for s in seis_students.values())
     print(f"  {len(seis_students)} students, {total_seis_settings} total settings in SEIS.")
 
@@ -101,32 +123,47 @@ def transform_seis_to_aeries(seis_report_path, aeries_csv_path=None, output_path
         aeries_students = {}
         print("  No Aeries export provided — importing all SEIS settings.")
 
+    # Load TOMS → Aeries code mapping
+    code_mapping = load_code_mapping()
+
     # Find new settings: in SEIS but not in Aeries
     output_rows = []
     new_students = 0
+    unmapped_codes = set()
+    from datetime import datetime
+    today = datetime.now().strftime("%m/%d/%Y")
+
     for ssid, seis_settings in seis_students.items():
         aeries_settings = aeries_students.get(ssid, set())
-        new_settings = seis_settings - aeries_settings
 
         if ssid not in aeries_students and seis_settings:
             new_students += 1
 
+        new_settings = seis_settings - aeries_settings
+
         for setting in new_settings:
-            output_rows.append([ssid, setting])
+            if setting in code_mapping:
+                output_rows.append([ssid, code_mapping[setting], today])
+            else:
+                unmapped_codes.add(setting)
 
     print(f"\n  Comparison results:")
     print(f"    New students (in SEIS, not in Aeries): {new_students}")
     print(f"    New settings to import: {len(output_rows)}")
-    print(f"    Settings already in Aeries (skipped): {total_seis_settings - len(output_rows)}")
+    print(f"    Settings already in Aeries (skipped): {total_seis_settings - len(output_rows) - len(unmapped_codes)}")
+    if unmapped_codes:
+        print(f"    Unmapped TOMS codes (skipped): {len(unmapped_codes)}")
+        for code in sorted(unmapped_codes):
+            print(f"      ⚠ {code}")
 
     if not output_rows:
         print("  No new settings to import.")
         return None
 
-    # Write CSV
+    # Write CSV with Aeries codes
     with open(output_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['CID', 'CD'])
+        writer.writerow(['CID', 'CD', 'SD'])
         for row in output_rows:
             writer.writerow(row)
 

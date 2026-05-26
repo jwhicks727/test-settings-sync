@@ -19,8 +19,7 @@ from toms_helpers import reenter_frame
 # Aeries code -> TOMS code (or None if TOMS doesn't track it)
 CODE_EQUIVALENTS = {
     'NEDS_RA_Items_Stimuli_ESN': 'NEDS_RA_Stimuli_ESN',
-    'NEDS_RA_SPA': None,  # Aeries tracks this but TOMS does not
-    'TDS_TTS_ALL': 'TDS_TTS_Item',  # Aeries umbrella code → TOMS component is returned if student does not get Spanish as well
+    'NEDS_RA_SPA': None,
 }
 
 def download_settings_report(driver, report_value, downloads_dir, file_pattern, form_id='studentTestSettingsForm'):
@@ -203,9 +202,9 @@ def verify_via_report(csv_path, report_path, report_settings_start_col=16, repor
             if detail['status'] == 'mismatch':
                 print(f"    SSID {detail['ssid']}:")
                 if detail['missing']:
-                    print(f"      Missing from TOMS: {detail['missing']}")
+                    print(f"      Missing from TOMS: {', '.join(detail['missing'])}")
                 if detail['extra']:
-                    print(f"      Extra in TOMS: {detail['extra']}")
+                    print(f"      Extra in TOMS: {', '.join(detail['extra'])}")
 
     if results['missing'] > 0:
         print(f"\n  Missing students (in Aeries but not in TOMS report):")
@@ -218,7 +217,6 @@ def verify_via_report(csv_path, report_path, report_settings_start_col=16, repor
         upload_date_str = datetime.now().strftime("%m/%d/%y")
         print(f"\n  Checking {results['missing']} missing student(s) via TOMS UI...")
 
-        # Navigate to Students menu
         driver.switch_to.default_content()
         driver.execute_script("""
             var btn = document.getElementById('menu_Students');
@@ -246,63 +244,64 @@ def verify_via_report(csv_path, report_path, report_settings_start_col=16, repor
 
     # Fall back to UI verification for mismatched students
     if results['mismatched'] > 0 and driver is not None:
-        print(f"\n  Re-checking {results['mismatched']} mismatched student(s) via TOMS UI...")
+        if results['mismatched'] > 10:
+            print(f"\n  {results['mismatched']} mismatches — too many for UI re-check, likely a code mapping issue.")
+        else:
+            print(f"\n  Re-checking {results['mismatched']} mismatched student(s) via TOMS UI...")
 
-        # Navigate to Students menu (may already be there from missing-student check)
-        driver.switch_to.default_content()
-        driver.execute_script("""
-            var btn = document.getElementById('menu_Students');
-            if (btn) btn.click();
-        """)
-        time.sleep(1)
+            driver.switch_to.default_content()
+            driver.execute_script("""
+                var btn = document.getElementById('menu_Students');
+                if (btn) btn.click();
+            """)
+            time.sleep(1)
 
-        resolved = 0
-        for detail in results['details']:
-            if detail['status'] != 'mismatch':
-                continue
+            resolved = 0
+            for detail in results['details']:
+                if detail['status'] != 'mismatch':
+                    continue
 
-            ssid = detail['ssid']
-            print(f"\n    Re-checking SSID {ssid}...")
+                ssid = detail['ssid']
+                print(f"\n    Re-checking SSID {ssid}...")
 
-            if not navigate_to_student(driver, ssid):
-                print(f"    Could not navigate to student — keeping mismatch.")
-                continue
+                if not navigate_to_student(driver, ssid):
+                    print(f"    Could not navigate to student — keeping mismatch.")
+                    continue
 
-            live = get_student_settings_from_toms(driver)
+                live = get_student_settings_from_toms(driver)
 
-            # Translate expected codes the same way the report comparison does
-            exp_settings = expected[ssid]
-            translated_exp = set()
-            for code in exp_settings:
-                if code in CODE_EQUIVALENTS:
-                    equiv = CODE_EQUIVALENTS[code]
-                    if equiv is not None:
-                        translated_exp.add(equiv)
+                exp_settings = expected[ssid]
+                translated_exp = set()
+                for code in exp_settings:
+                    if code in CODE_EQUIVALENTS:
+                        equiv = CODE_EQUIVALENTS[code]
+                        if equiv is not None:
+                            translated_exp.add(equiv)
+                    else:
+                        translated_exp.add(code)
+
+                missing = translated_exp - live
+                extra = live - translated_exp
+
+                if not missing and not extra:
+                    print(f"    ✓ All settings confirmed via UI (report was incomplete)")
+                    detail['status'] = 'pass (via UI)'
+                    detail['missing'] = set()
+                    detail['extra'] = set()
+                    results['mismatched'] -= 1
+                    results['matched'] += 1
+                    resolved += 1
                 else:
-                    translated_exp.add(code)
+                    print(f"    ✗ Still mismatched after UI check:")
+                    if missing:
+                        print(f"      Missing from TOMS: {', '.join(missing)}")
+                    if extra:
+                        print(f"      Extra in TOMS: {', '.join(extra)}")
+                    detail['missing'] = missing
+                    detail['extra'] = extra
 
-            missing = translated_exp - live
-            extra = live - translated_exp
-
-            if not missing and not extra:
-                print(f"    ✓ All settings confirmed via UI (report was incomplete)")
-                detail['status'] = 'pass (via UI)'
-                detail['missing'] = set()
-                detail['extra'] = set()
-                results['mismatched'] -= 1
-                results['matched'] += 1
-                resolved += 1
-            else:
-                print(f"    ✗ Still mismatched after UI check:")
-                if missing:
-                    print(f"      Missing from TOMS: {missing}")
-                if extra:
-                    print(f"      Extra in TOMS: {extra}")
-                detail['missing'] = missing
-                detail['extra'] = extra
-
-        if resolved > 0:
-            print(f"\n  Resolved {resolved} mismatch(es) via UI (report download was incomplete)")        
+            if resolved > 0:
+                print(f"\n  Resolved {resolved} mismatch(es) via UI (report download was incomplete)")
 
     return results
 

@@ -203,6 +203,11 @@ catching any discrepancies introduced outside the sync pipeline.
  
 ## Roadmap
 
+**Credential storage improvements** - Refactor credential storage from local Edge profile to environment variables (same macOS keychain or .env pattern as iru-device-reset)
+Document in README that this project intentionally stays local and user-initiated due to CAASPP/ELPAC Testing Affidavit considerations — autonomous cloud execution is out of scope
+
+**Structural refactoring** - Future architectural consideration: split into two phases — a "prepare CSV diff" data layer (Aeries → transform → output file) and an "apply via TOMS" Selenium layer (manual, user-present). Smaller affidavit-sensitive surface area and cleaner separation of concerns. Defer until data-wiping investigation is resolved.
+
 **Error handling and retry** — when TOMS returns validation errors,
 download the error CSV, identify affected students and settings, remove
 the problematic values from the template, and re-upload automatically.
