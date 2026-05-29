@@ -57,6 +57,83 @@ def has_changes(changes):
     return bool(changes['new_students'] or changes['removed_students']
                 or changes['settings_added'] or changes['settings_removed'])
 
+def resolve_concatenations(csv_path, code_mapping_path, output_path):
+    """Detect concatenated TOMS codes in Aeries CSV. Prompt user to resolve each.
+
+    Returns list of dicts: {'ssid', 'raw', 'chosen', 'col'}
+    """
+    import json
+
+    with open(code_mapping_path) as f:
+        known_codes = set(json.load(f)['toms_to_aeries'].keys())
+
+    # Sort longest first so greedy match prefers longer codes
+    sorted_codes = sorted(known_codes, key=len, reverse=True)
+
+    def parse(val):
+        """Greedy split against known codes. Returns list of codes, or [val] if no split."""
+        remaining = val
+        parsed = []
+        while remaining:
+            matched = False
+            for code in sorted_codes:
+                if remaining.startswith(code):
+                    parsed.append(code)
+                    remaining = remaining[len(code):]
+                    matched = True
+                    break
+            if not matched:
+                return [val]
+        return parsed if len(parsed) > 1 else [val]
+
+    with open(csv_path, newline='', encoding='utf-8-sig') as f:
+        rows = list(csv.reader(f))
+
+    resolutions = []
+    found_any = False
+
+    for row in rows:
+        ssid = row[0].strip()
+        for col_idx in range(1, len(row)):
+            val = row[col_idx].strip()
+            if not val or val in known_codes:
+                continue
+            parsed = parse(val)
+            if len(parsed) < 2:
+                continue
+
+            if not found_any:
+                print("\n" + "=" * 60)
+                print("CONCATENATED CODES DETECTED — resolution needed")
+                print("=" * 60)
+                found_any = True
+
+            print(f"\nSSID {ssid}, column {col_idx + 1}:")
+            print(f"  Raw value: {val}")
+            for i, code in enumerate(parsed):
+                print(f"  [{chr(65+i)}] {code}")
+            print(f"  [S] Skip (clear this cell)")
+
+            while True:
+                choice = input("  Choice: ").strip().upper()
+                if choice == 'S':
+                    row[col_idx] = ''
+                    resolutions.append({'ssid': ssid, 'raw': val, 'chosen': '(skipped)', 'col': col_idx + 1})
+                    break
+                elif choice and choice[0].isalpha() and ord(choice[0]) - 65 < len(parsed):
+                    chosen = parsed[ord(choice[0]) - 65]
+                    row[col_idx] = chosen
+                    resolutions.append({'ssid': ssid, 'raw': val, 'chosen': chosen, 'col': col_idx + 1})
+                    break
+                else:
+                    print("  Invalid choice — try again.")
+
+    with open(output_path, 'w', newline='') as f:
+        csv.writer(f).writerows(rows)
+
+    if resolutions:
+        print(f"\n  Resolved {len(resolutions)} concatenation(s). Saved to {output_path}")
+    return resolutions
 
 def filter_csv_for_errors(csv_path, parsed_errors, template_path, output_path):
     """Filter Aeries CSV to remove settings that caused TOMS errors.
@@ -180,6 +257,8 @@ def main():
     seis_import_result = None
     caaspp_errors_removed = []
     elpac_errors_removed = []
+    elpac_concatenations = []
+    caaspp_concatenations = []
 
     try:
         # ── Clean downloads folder ───────────────────────────────────────
@@ -285,7 +364,10 @@ def main():
             print("TOMS CAASPP login failed. Stopping.")
             return
 
-        if True:
+       # Default — used if upload block doesn't set a resolved version
+        working_csv = caaspp_export
+
+        if True:  # TEMP: force upload to flush stranded settings
             toms_navigate_to_upload(driver, upload_type_value=CAASPP_UPLOAD_TYPE)
 
             caaspp_template = toms_download_template(driver, downloads_dir, CAASPP_TEMPLATE)
@@ -296,7 +378,18 @@ def main():
             original_template = caaspp_template.replace('.xlsx', '_original.xlsx')
             shutil.copy2(caaspp_template, original_template)
 
-            working_csv = caaspp_export
+            # Resolve any concatenated codes from Aeries export bugs
+            resolved_csv = caaspp_export.replace('.csv', '_resolved.csv')
+            caaspp_concatenations = resolve_concatenations(
+                caaspp_export,
+                'code_mapping.json',
+                resolved_csv
+            )
+            if caaspp_concatenations:
+                working_csv = resolved_csv
+            else:
+                working_csv = caaspp_export
+
             merge(caaspp_template, working_csv, sheet_xml_path=SHEET_XML_PATH)
 
             if args.test:
@@ -350,7 +443,7 @@ def main():
                 '*CAASPP_StudentTestSettings*'
             )
             if caaspp_report:
-                caaspp_report_verify = verify_via_report(caaspp_export, caaspp_report, driver=driver)
+                caaspp_report_verify = verify_via_report(working_csv, caaspp_report, driver=driver)
 
                 # Retry report download if too many mismatches (form.submit() can be incomplete)
                 report_retry = 0
@@ -391,6 +484,9 @@ def main():
             print("TOMS ELPAC login failed. Stopping.")
             return
 
+        # Default — used if upload block doesn't set a resolved version
+        elpac_working_csv = elpac_export
+
         if has_changes(elpac_changes):
             toms_navigate_to_upload(driver, upload_type_value=ELPAC_UPLOAD_TYPE)
 
@@ -402,7 +498,18 @@ def main():
             elpac_original_template = elpac_template.replace('.xlsx', '_original.xlsx')
             shutil.copy2(elpac_template, elpac_original_template)
 
-            elpac_working_csv = elpac_export
+            # Resolve any concatenated codes from Aeries export bugs
+            elpac_resolved_csv = elpac_export.replace('.csv', '_resolved.csv')
+            elpac_concatenations = resolve_concatenations(
+                elpac_export,
+                'code_mapping.json',
+                elpac_resolved_csv
+            )
+            if elpac_concatenations:
+                elpac_working_csv = elpac_resolved_csv
+            else:
+                elpac_working_csv = elpac_export
+
             merge(elpac_template, elpac_working_csv, sheet_xml_path=SHEET_XML_PATH)
 
             if args.test:
@@ -456,7 +563,7 @@ def main():
                 form_id='elpacstudentTestSettingsForm'
             )
             if elpac_report:
-                elpac_report_verify = verify_via_report(elpac_export, elpac_report, driver=driver)
+                elpac_report_verify = verify_via_report(elpac_working_csv, elpac_report, driver=driver)
 
                 # Retry report download if too many mismatches (form.submit() can be incomplete)
                 report_retry = 0
@@ -510,7 +617,9 @@ def main():
             sheets_updated=sheets_updated,
             seis_result=seis_import_result,
             caaspp_errors_removed=caaspp_errors_removed,
-            elpac_errors_removed=elpac_errors_removed
+            elpac_errors_removed=elpac_errors_removed,
+            caaspp_concatenations=caaspp_concatenations,
+            elpac_concatenations=elpac_concatenations
         )
 
         today_str = datetime.now().strftime("%m/%d/%Y")

@@ -150,16 +150,25 @@ def toms_login(driver, role_text):
     return True
 
 
-def reenter_frame(driver):
+def reenter_frame(driver, max_wait=20):
     """Switch back to the main content iframe after a page load."""
     driver.switch_to.default_content()
     time.sleep(1)
-    for attempt in range(50):
+    found = False
+    for attempt in range(max_wait * 10):  # 0.1s intervals
         if find_element(driver, '#theFrame'):
+            found = True
             break
         time.sleep(0.1)
-    driver.switch_to.frame("theFrame")
-    print("Back inside iframe.")
+    if not found:
+        print(f"  ⚠ Frame not found after {max_wait}s, retrying once more...")
+        time.sleep(3)
+    try:
+        driver.switch_to.frame("theFrame")
+        print("Back inside iframe.")
+    except Exception as e:
+        print(f"  ⚠ Frame switch failed: {e}")
+        raise
 
 
 def toms_navigate_to_upload(driver, upload_type_value='/mt/dt/uploadaccoms.htm'):
